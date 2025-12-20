@@ -16,6 +16,6 @@ MonoBehaviour:
   radius: 200
   radialSegments: 128
   ringSegments: 128
-  terrainMaterial: {fileID: 0}
+  terrainMaterial: {fileID: 15303, guid: 0000000000000000f000000000000000, type: 0}
   clearPrevious: 1
   worldRootName: GeneratedWorld
