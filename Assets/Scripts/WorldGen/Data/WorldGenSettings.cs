@@ -16,6 +16,14 @@ namespace WorldGen.Core
         [Header("Materials")]
         public Material terrainMaterial;
 
+        [Header("Height Noise (FBM)")]
+        public float heightAmplitude = 12f;
+        public float baseFrequency = 0.01f;
+        public int octaves = 5;
+        public float persistence = 0.5f;
+        public float lacunarity = 2.0f;
+        public Vector2 noiseOffset = Vector2.zero;
+
         [Header("Generation")]
         public bool clearPrevious = true;
         public string worldRootName = "GeneratedWorld";

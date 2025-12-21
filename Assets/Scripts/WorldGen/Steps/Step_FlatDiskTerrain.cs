@@ -73,8 +73,9 @@ namespace WorldGen.Steps
                     int i3 = row1 + a + 1;
 
                     // Two triangles per quad
-                    tris[ti++] = i0; tris[ti++] = i2; tris[ti++] = i1;
-                    tris[ti++] = i1; tris[ti++] = i2; tris[ti++] = i3;
+                    // Winding order matters: use clockwise winding when looking from +Y so normals point up.
+                    tris[ti++] = i0; tris[ti++] = i1; tris[ti++] = i2;
+                    tris[ti++] = i1; tris[ti++] = i3; tris[ti++] = i2;
                 }
             }
 
