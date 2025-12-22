@@ -37,3 +37,5 @@ sysinfo.txt
 # Addressables cache
 # ===============================
 Assets/AddressableAssetsData/*/*.bin*
+
+Assets/Scenes
