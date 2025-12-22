@@ -12,5 +12,8 @@ namespace WorldGen.Core
         // Outputs
         public GameObject TerrainGO;
         public Mesh TerrainMesh;
+
+        // Canonical grid data (data foundation for later steps)
+        public WorldGridData Grid;
     }
 }

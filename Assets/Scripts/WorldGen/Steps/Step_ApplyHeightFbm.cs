@@ -59,6 +59,22 @@ namespace WorldGen.Steps
 
             // Same instance is fine; set back for clarity.
             ctx.TerrainMesh = mesh;
+
+            // If wireframe overlay exists, keep it in sync with the terrain vertex positions.
+            if (ctx.TerrainGO != null)
+            {
+                var wf = ctx.TerrainGO.transform.Find("Wireframe");
+                if (wf != null)
+                {
+                    var wfMf = wf.GetComponent<MeshFilter>();
+                    var wfMesh = (wfMf != null) ? wfMf.sharedMesh : null;
+                    if (wfMesh != null && wfMesh.vertexCount == mesh.vertexCount)
+                    {
+                        wfMesh.vertices = mesh.vertices;
+                        wfMesh.RecalculateBounds();
+                    }
+                }
+            }
         }
 
         private static Vector2 CreateSeedOffset(int seed)
