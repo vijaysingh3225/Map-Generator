@@ -32,10 +32,17 @@ namespace WorldGen.Core
             };
 
             // If Step_BuildWorldGridData is present anywhere in the list, enforce that it runs immediately after
-            // Step_ApplyHeightFbm (so the canonical grid matches the final displaced mesh).
+            // the last "height modification" step so the canonical grid matches the final displaced mesh.
+            // (If zones are enabled and present, that becomes the enforced spot; otherwise FBM remains the spot.)
             Step_BuildWorldGridData gridStep = null;
+            var hasZonesStep = false;
             for (int i = 0; i < stepBehaviours.Count; i++)
             {
+                // Avoid compile-time dependency on optional steps: detect by type name.
+                // (Unity will compile the step if present in the project; this keeps WorldGenerator resilient.)
+                if (!hasZonesStep && stepBehaviours[i] != null && stepBehaviours[i].GetType().Name == "Step_CreateElevationZonesBlobs")
+                    hasZonesStep = true;
+
                 if (stepBehaviours[i] is Step_BuildWorldGridData s)
                 {
                     gridStep = s;
@@ -43,6 +50,7 @@ namespace WorldGen.Core
                 }
             }
             var ranGridStep = false;
+            var enforceAfterZones = hasZonesStep;
 
             foreach (var mb in stepBehaviours)
             {
@@ -56,7 +64,9 @@ namespace WorldGen.Core
 
                     step.Generate(settings, ctx);
 
-                    if (!ranGridStep && gridStep != null && step is Step_ApplyHeightFbm)
+                    if (!ranGridStep && gridStep != null &&
+                        ((enforceAfterZones && mb.GetType().Name == "Step_CreateElevationZonesBlobs") ||
+                         (!enforceAfterZones && step is Step_ApplyHeightFbm)))
                     {
                         gridStep.Generate(settings, ctx);
                         ranGridStep = true;

@@ -44,6 +44,18 @@ namespace WorldGen.Core
         public float lacunarity = 2.0f;
         public Vector2 noiseOffset = Vector2.zero;
 
+        [Header("Elevation Zones (Metaballs / Blobs)")]
+        public bool zonesEnabled = true;
+        [Min(0)] public int zonesCount = 5;
+        [Min(1)] public int radiusMinCells = 20;
+        [Min(1)] public int radiusMaxCells = 60;
+        public float elevationMinMeters = 8f;
+        public float elevationMaxMeters = 45f;
+        [Tooltip("Threshold on the summed blob field F = sum(Fi). Higher -> fewer/smaller zones.")]
+        public float fieldThreshold = 0.9f;
+        [Tooltip("Polynomial falloff power for Fi = max(0, 1 - d)^power where d=distance/radius. Higher -> harder-ish edges.")]
+        public float falloffPower = 3.0f;
+
         [Header("Debug Settings")]
         public bool enableDebugLogs = true;
         public bool exportDebugTextures = false;
