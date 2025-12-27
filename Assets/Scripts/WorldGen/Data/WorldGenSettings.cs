@@ -49,6 +49,10 @@ namespace WorldGen.Core
         [Min(0)] public int zonesCount = 5;
         [Min(1)] public int radiusMinCells = 20;
         [Min(1)] public int radiusMaxCells = 60;
+        [Min(1)] public int zonesSlopeWidthCells = 24;
+        public bool zonesBlendEnabled = true;
+        [Min(1)] public int zonesBlendWidthCells = 12;
+        [Min(1)] public int zonesBlendKernelRadius = 3;
         public float elevationMinMeters = 8f;
         public float elevationMaxMeters = 45f;
         [Tooltip("Threshold on the summed blob field F = sum(Fi). Higher -> fewer/smaller zones.")]

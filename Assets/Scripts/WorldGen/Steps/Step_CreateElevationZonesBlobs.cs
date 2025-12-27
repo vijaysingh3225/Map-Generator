@@ -91,6 +91,7 @@ namespace WorldGen.Steps
             var inside = new bool[grid.width * grid.height];
             var zoneIdNorm = new float[grid.width * grid.height];
             var heightDelta = new float[grid.width * grid.height];
+            var zoneId = new int[grid.width * grid.height];
 
             var invKMinus1 = (K > 1) ? (1f / (K - 1)) : 0f;
 
@@ -106,6 +107,7 @@ namespace WorldGen.Steps
                         inside[idx] = false;
                         zoneIdNorm[idx] = 0f;
                         heightDelta[idx] = 0f;
+                        zoneId[idx] = -1;
                         continue;
                     }
 
@@ -136,10 +138,161 @@ namespace WorldGen.Steps
                     inside[idx] = inZone;
 
                     zoneIdNorm[idx] = (bestF > 0f && K > 1) ? (bestI * invKMinus1) : 0f;
+                    zoneId[idx] = bestI;
+
+                    // Apply hard elevation inside the zone mask (no smoothing to outside terrain here).
                     var delta = inZone ? elevationMeters[bestI] : 0f;
                     heightDelta[idx] = delta;
                     grid.heightLayer[idx] += delta;
                 }
+            }
+
+            // Optional: Smooth ONLY internal edges between different zones, and ONLY inside the zone mask.
+            // This preserves:
+            // - a hard disk rim (we never smooth due to outside-of-disk neighbors)
+            // - a hard zone-vs-non-zone edge (we never blend using non-zone cells)
+            float[] internalBoundary01 = null;
+            float[] distToInternalBoundary = null;
+            float[] blendMask = null;
+            float[] heightDeltaBlend = null;
+
+            if (settings.zonesBlendEnabled)
+            {
+                var blendWidth = Mathf.Max(1, settings.zonesBlendWidthCells);
+                var kernelRadius = Mathf.Max(1, settings.zonesBlendKernelRadius);
+                var kernelR2 = kernelRadius * kernelRadius;
+
+                // 1) Internal boundary mask: insideZone && neighbor insideZone with different zoneId (neighbor must be inside disk).
+                var internalBoundary = new bool[grid.width * grid.height];
+                internalBoundary01 = new float[grid.width * grid.height];
+
+                for (int y = 0; y < grid.height; y++)
+                {
+                    for (int x = 0; x < grid.width; x++)
+                    {
+                        var idx = grid.Idx(x, y);
+                        if (!inside[idx])
+                        {
+                            internalBoundary[idx] = false;
+                            internalBoundary01[idx] = 0f;
+                            continue;
+                        }
+
+                        var zid = zoneId[idx];
+                        var isInternalBoundary =
+                            HasDifferentZoneNeighborInsideZone(grid, inside, zoneId, x - 1, y, zid) ||
+                            HasDifferentZoneNeighborInsideZone(grid, inside, zoneId, x + 1, y, zid) ||
+                            HasDifferentZoneNeighborInsideZone(grid, inside, zoneId, x, y - 1, zid) ||
+                            HasDifferentZoneNeighborInsideZone(grid, inside, zoneId, x, y + 1, zid);
+
+                        internalBoundary[idx] = isInternalBoundary;
+                        internalBoundary01[idx] = isInternalBoundary ? 1f : 0f;
+                    }
+                }
+
+                // 2) distToInternalBoundary via multi-source BFS, traversing insideZone cells only.
+                var distInt = new int[grid.width * grid.height];
+                for (int i = 0; i < distInt.Length; i++) distInt[i] = int.MaxValue;
+
+                var queue = new int[grid.width * grid.height];
+                int head = 0, tail = 0;
+
+                for (int i = 0; i < internalBoundary.Length; i++)
+                {
+                    if (!internalBoundary[i]) continue;
+                    distInt[i] = 0;
+                    queue[tail++] = i;
+                }
+
+                while (head < tail)
+                {
+                    var cur = queue[head++];
+                    var curD = distInt[cur];
+                    var cx2 = cur % grid.width;
+                    var cy2 = cur / grid.width;
+
+                    TryRelaxInsideZone(grid, inside, distInt, queue, ref tail, cx2 - 1, cy2, curD + 1);
+                    TryRelaxInsideZone(grid, inside, distInt, queue, ref tail, cx2 + 1, cy2, curD + 1);
+                    TryRelaxInsideZone(grid, inside, distInt, queue, ref tail, cx2, cy2 - 1, curD + 1);
+                    TryRelaxInsideZone(grid, inside, distInt, queue, ref tail, cx2, cy2 + 1, curD + 1);
+                }
+
+                distToInternalBoundary = new float[grid.width * grid.height];
+                blendMask = new float[grid.width * grid.height];
+                heightDeltaBlend = new float[grid.width * grid.height];
+
+                var heightBeforeBlend = (float[])grid.heightLayer.Clone();
+                var heightAfter = (float[])grid.heightLayer.Clone();
+
+                // 3/4) Blend only near internal boundaries: insideZone cells only, averaging only over insideZone neighbors.
+                for (int y = 0; y < grid.height; y++)
+                {
+                    for (int x = 0; x < grid.width; x++)
+                    {
+                        var idx = grid.Idx(x, y);
+                        if (!inside[idx])
+                        {
+                            distToInternalBoundary[idx] = 0f;
+                            blendMask[idx] = 0f;
+                            heightDeltaBlend[idx] = 0f;
+                            continue;
+                        }
+
+                        var d = distInt[idx];
+                        if (d == int.MaxValue) d = blendWidth + 999;
+                        distToInternalBoundary[idx] = d;
+
+                        if (d > blendWidth)
+                        {
+                            blendMask[idx] = 0f;
+                            heightDeltaBlend[idx] = 0f;
+                            continue;
+                        }
+
+                        // local weighted average in a disk neighborhood
+                        float sumW = 0f;
+                        float sumH = 0f;
+
+                        // Gaussian-like weights based on squared distance in cells.
+                        var sigma = kernelRadius * 0.5f + 0.5f;
+                        var inv2Sigma2 = 1f / (2f * sigma * sigma);
+
+                        for (int oy = -kernelRadius; oy <= kernelRadius; oy++)
+                        {
+                            var ny = y + oy;
+                            if (ny < 0 || ny >= grid.height) continue;
+                            for (int ox = -kernelRadius; ox <= kernelRadius; ox++)
+                            {
+                                var nx = x + ox;
+                                if (nx < 0 || nx >= grid.width) continue;
+                                var r2 = (ox * ox) + (oy * oy);
+                                if (r2 > kernelR2) continue;
+
+                                var ni = grid.Idx(nx, ny);
+                                if (!grid.maskDisk[ni]) continue;
+                                if (!inside[ni]) continue; // do NOT blend with non-zone cells
+
+                                var w = Mathf.Exp(-r2 * inv2Sigma2);
+                                sumW += w;
+                                sumH += heightBeforeBlend[ni] * w;
+                            }
+                        }
+
+                        var hs = (sumW > 1e-6f) ? (sumH / sumW) : heightBeforeBlend[idx];
+
+                        // blend factor: strongest at boundary, fades to 0 at blend width
+                        var t = Mathf.Clamp01(d / (float)blendWidth);
+                        var a = 1f - Smoothstep01(t);
+                        blendMask[idx] = a;
+
+                        var h0 = heightBeforeBlend[idx];
+                        var h1 = Mathf.Lerp(h0, hs, a);
+                        heightAfter[idx] = h1;
+                        heightDeltaBlend[idx] = h1 - h0;
+                    }
+                }
+
+                grid.heightLayer = heightAfter;
             }
 
             // Derived.
@@ -150,7 +303,8 @@ namespace WorldGen.Steps
 
             if (settings.exportDebugTextures)
             {
-                ExportDebug(settings, grid, field, inside, zoneIdNorm, heightDelta);
+                ExportDebug(settings, grid, field, inside, zoneIdNorm, heightDelta, internalBoundary01, distToInternalBoundary, blendMask, heightDeltaBlend,
+                    null, null);
             }
         }
 
@@ -160,6 +314,32 @@ namespace WorldGen.Steps
             var t = 1f - d;
             if (t <= 0f) return 0f;
             return Mathf.Pow(t, falloffPower);
+        }
+
+        private static float Smoothstep01(float t)
+        {
+            t = Mathf.Clamp01(t);
+            return t * t * (3f - 2f * t);
+        }
+
+        private static bool HasDifferentZoneNeighborInsideZone(WorldGridData grid, bool[] insideZone, int[] zoneId, int nx, int ny, int myZoneId)
+        {
+            if (!grid.InBounds(nx, ny)) return false;
+            var ni = grid.Idx(nx, ny);
+            if (!grid.maskDisk[ni]) return false;     // do NOT consider outside-of-disk as internal boundary
+            if (!insideZone[ni]) return false;        // only smooth between zones (both sides insideZone)
+            return zoneId[ni] != myZoneId;
+        }
+
+        private static void TryRelaxInsideZone(WorldGridData grid, bool[] insideZone, int[] dist, int[] q, ref int tail, int nx, int ny, int nd)
+        {
+            if (!grid.InBounds(nx, ny)) return;
+            var ni = grid.Idx(nx, ny);
+            if (!grid.maskDisk[ni]) return;
+            if (!insideZone[ni]) return; // traverse insideZone only
+            if (nd >= dist[ni]) return;
+            dist[ni] = nd;
+            q[tail++] = ni;
         }
 
         private static int NextIntInclusive(System.Random rng, int minInclusive, int maxInclusive)
@@ -363,7 +543,19 @@ namespace WorldGen.Steps
             }
         }
 
-        private static void ExportDebug(WorldGenSettings settings, WorldGridData grid, float[] field, bool[] inside, float[] zoneIdNorm, float[] heightDelta)
+        private static void ExportDebug(
+            WorldGenSettings settings,
+            WorldGridData grid,
+            float[] field,
+            bool[] inside,
+            float[] zoneIdNorm,
+            float[] heightDelta,
+            float[] internalBoundary01,
+            float[] distToInternalBoundary,
+            float[] blendMask,
+            float[] heightDeltaBlend,
+            float[] distWarped,
+            float[] blendMaskWarped)
         {
             const string folder = "Assets/WorldGen/DebugOutputs";
 
@@ -400,7 +592,37 @@ namespace WorldGen.Steps
             var texDelta = WorldGenDebugUtil.BuildFloatLayerTexture(grid.width, grid.height, heightDelta, grid.maskDisk, settings.debugTextureSize, out _);
             var pathDelta = WorldGenDebugUtil.SavePng(texDelta, folder, "Step_Zones_HeightDelta");
 
-            Debug.Log($"[Zones] Exported PNGs: {pathField}, {pathMask}, {pathZone}, {pathDelta}");
+            // New debug outputs for internal zone blending (optional; exported only when arrays provided).
+            string pathInternal = null;
+            string pathDistInternal = null;
+            string pathBlend = null;
+            string pathDeltaBlend = null;
+
+            if (internalBoundary01 != null)
+            {
+                var texInternal = WorldGenDebugUtil.BuildFloatLayerTexture(grid.width, grid.height, internalBoundary01, grid.maskDisk, settings.debugTextureSize, out _);
+                pathInternal = WorldGenDebugUtil.SavePng(texInternal, folder, "Step_Zones_InternalBoundary");
+            }
+
+            if (distToInternalBoundary != null)
+            {
+                var texDistInternal = WorldGenDebugUtil.BuildFloatLayerTexture(grid.width, grid.height, distToInternalBoundary, grid.maskDisk, settings.debugTextureSize, out _);
+                pathDistInternal = WorldGenDebugUtil.SavePng(texDistInternal, folder, "Step_Zones_DistToBoundary");
+            }
+
+            if (blendMask != null)
+            {
+                var texBlend = WorldGenDebugUtil.BuildFloatLayerTexture(grid.width, grid.height, blendMask, grid.maskDisk, settings.debugTextureSize, out _);
+                pathBlend = WorldGenDebugUtil.SavePng(texBlend, folder, "Step_Zones_BlendMask");
+            }
+
+            if (heightDeltaBlend != null)
+            {
+                var texDeltaBlend = WorldGenDebugUtil.BuildFloatLayerTexture(grid.width, grid.height, heightDeltaBlend, grid.maskDisk, settings.debugTextureSize, out _);
+                pathDeltaBlend = WorldGenDebugUtil.SavePng(texDeltaBlend, folder, "Step_Zones_HeightDelta_Blend");
+            }
+
+            Debug.Log($"[Zones] Exported PNGs: {pathField}, {pathMask}, {pathZone}, {pathDelta}, {pathInternal}, {pathDistInternal}, {pathBlend}, {pathDeltaBlend}");
 
 #if UNITY_EDITOR
             AssetDatabase.Refresh();
