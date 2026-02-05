@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using UnityEngine;
-using WorldGen.Steps;
 
 namespace WorldGen.Core
 {
@@ -26,31 +25,8 @@ namespace WorldGen.Core
 
             var ctx = new WorldContext
             {
-                Seed = settings.seed,
-                Rng = new System.Random(settings.seed),
                 WorldRoot = new GameObject(settings.worldRootName)
             };
-
-            // If Step_BuildWorldGridData is present anywhere in the list, enforce that it runs immediately after
-            // the last "height modification" step so the canonical grid matches the final displaced mesh.
-            // (If zones are enabled and present, that becomes the enforced spot; otherwise FBM remains the spot.)
-            Step_BuildWorldGridData gridStep = null;
-            var hasZonesStep = false;
-            for (int i = 0; i < stepBehaviours.Count; i++)
-            {
-                // Avoid compile-time dependency on optional steps: detect by type name.
-                // (Unity will compile the step if present in the project; this keeps WorldGenerator resilient.)
-                if (!hasZonesStep && stepBehaviours[i] != null && stepBehaviours[i].GetType().Name == "Step_CreateElevationZonesBlobs")
-                    hasZonesStep = true;
-
-                if (stepBehaviours[i] is Step_BuildWorldGridData s)
-                {
-                    gridStep = s;
-                    break;
-                }
-            }
-            var ranGridStep = false;
-            var enforceAfterZones = hasZonesStep;
 
             foreach (var mb in stepBehaviours)
             {
@@ -58,30 +34,12 @@ namespace WorldGen.Core
 
                 if (mb is IGenerationStep step)
                 {
-                    // Skip the grid step here; we run it in the enforced spot.
-                    if (!ranGridStep && step is Step_BuildWorldGridData)
-                        continue;
-
                     step.Generate(settings, ctx);
-
-                    if (!ranGridStep && gridStep != null &&
-                        ((enforceAfterZones && mb.GetType().Name == "Step_CreateElevationZonesBlobs") ||
-                         (!enforceAfterZones && step is Step_ApplyHeightFbm)))
-                    {
-                        gridStep.Generate(settings, ctx);
-                        ranGridStep = true;
-                    }
                 }
                 else
                 {
                     Debug.LogWarning($"{mb.name} does not implement IGenerationStep.");
                 }
-            }
-
-            // If no ApplyHeightFbm exists but the grid step does, run it at the end (still better than not running).
-            if (!ranGridStep && gridStep != null)
-            {
-                gridStep.Generate(settings, ctx);
             }
         }
     }

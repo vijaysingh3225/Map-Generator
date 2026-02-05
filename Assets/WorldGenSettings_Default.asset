@@ -12,10 +12,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 60fa7614565b2654486b53182e3458a0, type: 3}
   m_Name: WorldGenSettings_Default
   m_EditorClassIdentifier: 
-  seed: 12345
   radius: 200
-  radialSegments: 128
-  ringSegments: 128
+  cellSizeWorld: 2
+  clipToCircle: 1
+  useFlatShading: 1
   terrainMaterial: {fileID: 15303, guid: 0000000000000000f000000000000000, type: 0}
   clearPrevious: 1
   worldRootName: GeneratedWorld

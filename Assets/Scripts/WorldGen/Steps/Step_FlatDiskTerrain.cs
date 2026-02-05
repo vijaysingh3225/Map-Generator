@@ -21,8 +21,6 @@ namespace WorldGen.Steps
             if (settings.terrainMaterial != null)
                 mr.sharedMaterial = settings.terrainMaterial;
 
-            SyncWireframe(go, mesh, settings);
-
             ctx.TerrainGO = go;
             ctx.TerrainMesh = mesh;
         }
@@ -169,78 +167,5 @@ namespace WorldGen.Steps
             return mesh;
         }
 
-        private static void SyncWireframe(GameObject terrainGo, Mesh terrainMesh, WorldGenSettings settings)
-        {
-            var existing = terrainGo.transform.Find("Wireframe");
-
-            if (!settings.showWireframe)
-            {
-                if (existing != null)
-                    DestroyImmediate(existing.gameObject);
-                return;
-            }
-
-            GameObject wfGo;
-            if (existing != null) wfGo = existing.gameObject;
-            else
-            {
-                wfGo = new GameObject("Wireframe");
-                wfGo.transform.SetParent(terrainGo.transform, worldPositionStays: false);
-            }
-
-            var mf = wfGo.GetComponent<MeshFilter>();
-            if (mf == null) mf = wfGo.AddComponent<MeshFilter>();
-
-            var mr = wfGo.GetComponent<MeshRenderer>();
-            if (mr == null) mr = wfGo.AddComponent<MeshRenderer>();
-
-            mr.sharedMaterial = settings.wireframeMaterial != null ? settings.wireframeMaterial : CreateDefaultWireframeMaterial();
-
-            // Build a line mesh that mirrors the terrain vertex layout so it can be updated later.
-            mf.sharedMesh = BuildWireframeMesh(terrainMesh);
-        }
-
-        private static Mesh BuildWireframeMesh(Mesh terrainMesh)
-        {
-            var verts = terrainMesh.vertices;
-            var tris = terrainMesh.triangles;
-
-            // Lines: 3 edges per triangle. This may draw duplicate edges, but it's simple and readable.
-            var lineIdx = new int[tris.Length * 2];
-            int li = 0;
-            for (int t = 0; t < tris.Length; t += 3)
-            {
-                var a = tris[t + 0];
-                var b = tris[t + 1];
-                var c = tris[t + 2];
-
-                lineIdx[li++] = a; lineIdx[li++] = b;
-                lineIdx[li++] = b; lineIdx[li++] = c;
-                lineIdx[li++] = c; lineIdx[li++] = a;
-            }
-
-            var mesh = new Mesh();
-            mesh.name = terrainMesh.name + "_Wireframe";
-            if (verts.Length > 65535)
-                mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
-
-            mesh.vertices = verts;
-            mesh.SetIndices(lineIdx, MeshTopology.Lines, 0);
-            mesh.RecalculateBounds();
-            return mesh;
-        }
-
-        private static Material CreateDefaultWireframeMaterial()
-        {
-            var shader =
-                Shader.Find("Universal Render Pipeline/Unlit") ??
-                Shader.Find("Unlit/Color") ??
-                Shader.Find("Sprites/Default");
-
-            var mat = new Material(shader);
-            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", new Color(0f, 0f, 0f, 1f));
-            else if (mat.HasProperty("_Color")) mat.SetColor("_Color", new Color(0f, 0f, 0f, 1f));
-            return mat;
-        }
     }
 }
